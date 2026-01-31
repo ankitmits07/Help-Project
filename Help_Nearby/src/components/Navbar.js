@@ -9,8 +9,17 @@ export default function Navbar() {
   const [darkMode, setDarkMode] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [messageCount, setMessageCount] = useState(0);
 
   useEffect(() => {
+    // Load notifications from localStorage on component mount
+    const loadStoredNotifications = () => {
+      const stored = JSON.parse(localStorage.getItem('helpNotifications') || '[]');
+      setNotifications(stored);
+    };
+    
+    loadStoredNotifications();
+    
     // Listen for notification updates from NotificationSystem
     const handleNotificationUpdate = (event) => {
       setNotifications(event.detail.notifications);
@@ -27,8 +36,18 @@ export default function Navbar() {
     
     document.addEventListener('click', handleClickOutside);
 
+    // Listen for message notifications
+    const handleMessageNotification = (event) => {
+      if (event.detail.type === 'message') {
+        setMessageCount(prev => prev + 1);
+      }
+    };
+
+    window.addEventListener('messageNotification', handleMessageNotification);
+
     return () => {
       window.removeEventListener('notificationUpdate', handleNotificationUpdate);
+      window.removeEventListener('messageNotification', handleMessageNotification);
       document.removeEventListener('click', handleClickOutside);
     };
   }, []);
@@ -50,6 +69,7 @@ export default function Navbar() {
 
   const clearAllNotifications = () => {
     setNotifications([]);
+    localStorage.removeItem('helpNotifications');
     window.dispatchEvent(new CustomEvent('clearAllNotifications'));
   };
 
@@ -88,8 +108,11 @@ export default function Navbar() {
                 📋 My Requests
               </Link>
               
-              <button className="nav-btn nav-btn-icon" title="Chat">
+              <button className="nav-btn nav-btn-icon" title="Messages" onClick={() => window.location.href = '/chat'}>
                 💬
+                {messageCount > 0 && (
+                  <span className="notification-badge">{messageCount}</span>
+                )}
               </button>
               
               <div className="notification-wrapper">

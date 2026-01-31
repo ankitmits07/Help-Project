@@ -65,13 +65,13 @@ export default function NotificationSystem() {
     socket.on('receiveMessage', (data) => {
       if (data.userId !== user._id) {
         playNotificationSound();
-        addNotification({
-          id: Date.now(),
-          type: 'message',
-          title: 'New Message',
-          message: `${data.userName}: ${data.message.substring(0, 30)}...`,
-          icon: '💬'
-        });
+        // Only show count, not full notification
+        window.dispatchEvent(new CustomEvent('messageNotification', {
+          detail: {
+            type: 'message',
+            count: 1
+          }
+        }));
       }
     });
 

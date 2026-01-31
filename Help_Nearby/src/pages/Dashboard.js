@@ -40,21 +40,48 @@ export default function Dashboard() {
       });
     });
     
-    // Listen for new requests (instant notification)
+    // Listen for new requests (auto-refresh nearby only)
     socket.on("newRequestCreated", (data) => {
       console.log('New request received:', data);
-      fetchNearby();
       
-      // Show instant notification for other users
+      // Only add new requests, don't remove existing ones
       if (data.userId !== user._id) {
-        window.dispatchEvent(new CustomEvent('newNotification', {
-          detail: {
-            id: Date.now(),
-            type: 'request',
-            title: 'New Help Request Nearby',
-            message: `${data.userName} needs help with ${data.category}`,
-            icon: '🆘'
+        setRequests(prev => {
+          const exists = prev.find(r => r._id === data.requestId);
+          if (!exists) {
+            return [...prev, {
+              _id: data.requestId,
+              user: { _id: data.userId, name: data.userName },
+              category: data.category,
+              description: data.description,
+              location: data.location,
+              status: 'open',
+              createdAt: new Date()
+            }];
           }
+          return prev;
+        });
+        
+        // Store notification in localStorage for persistence
+        const notification = {
+          id: Date.now(),
+          type: 'request',
+          title: 'New Help Request Nearby',
+          message: `${data.userName} needs help with ${data.category}`,
+          icon: '🆘',
+          persistent: true,
+          timestamp: new Date().toISOString(),
+          requestData: data
+        };
+        
+        // Store in localStorage
+        const existingNotifications = JSON.parse(localStorage.getItem('helpNotifications') || '[]');
+        existingNotifications.push(notification);
+        localStorage.setItem('helpNotifications', JSON.stringify(existingNotifications));
+        
+        // Show notification
+        window.dispatchEvent(new CustomEvent('newNotification', {
+          detail: notification
         }));
       }
     });
@@ -109,18 +136,38 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [selected]);
 
-  const fetchNearby = () => {
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      try {
-        const endpoint = show24Hours ? '/requests/all' : '/requests/nearby';
-        const res = await API.get(
-          `${endpoint}?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`
-        );
-        setRequests(res.data);
-      } catch (err) {
-        console.error("Error fetching requests", err);
-      }
-    });
+  const fetchNearby = async () => {
+    try {
+      // First get user's own requests
+      const myRequestsRes = await API.get('/requests/my-requests');
+      
+      // Then get nearby requests
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        try {
+          const endpoint = show24Hours ? '/requests/all' : '/requests/nearby';
+          const nearbyRes = await API.get(
+            `${endpoint}?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`
+          );
+          
+          // Combine user's requests with nearby requests (limit nearby to 3)
+          const nearbyRequests = nearbyRes.data
+            .filter(req => req.status !== 'completed')
+            .slice(0, 3);
+          
+          setRequests([...myRequestsRes.data, ...nearbyRequests]);
+        } catch (err) {
+          console.error("Error fetching nearby requests", err);
+          // If geolocation fails, at least show user's own requests
+          setRequests(myRequestsRes.data);
+        }
+      }, (error) => {
+        console.error("Geolocation error:", error);
+        // If geolocation fails, at least show user's own requests
+        setRequests(myRequestsRes.data);
+      });
+    } catch (err) {
+      console.error("Error fetching my requests", err);
+    }
   };
 
   const fetchAcceptedRequests = async () => {
@@ -247,12 +294,11 @@ export default function Dashboard() {
     const requestLat = selected.location.coordinates[1];
     const requestLng = selected.location.coordinates[0];
     
-    if (userLocation && selected.helper && selected.helper._id === user._id) {
-      // Show both locations if user is the helper
-      return `https://maps.google.com/maps?q=${requestLat},${requestLng}&z=15&output=embed`;
-    } else if (userLocation && selected.user._id === user._id) {
-      // Show helper location if user is the requester and request is accepted
-      return `https://maps.google.com/maps?q=${requestLat},${requestLng}&z=15&output=embed`;
+    if (userLocation && selected.status === 'accepted' && isNavigating) {
+      // Show live directions between both users when navigation is active
+      const userLat = userLocation.lat;
+      const userLng = userLocation.lng;
+      return `https://www.google.com/maps/dir/${userLat},${userLng}/${requestLat},${requestLng}/@${(userLat + requestLat) / 2},${(userLng + requestLng) / 2},13z`;
     }
     
     return `https://maps.google.com/maps?q=${requestLat},${requestLng}&z=15&output=embed`;
@@ -290,27 +336,9 @@ export default function Dashboard() {
           </div>
 
           {/* MY CREATED REQUESTS */}
-          <div className="d-flex justify-content-between align-items-center mb-2">
-            <h6 className="fw-bold mb-0 d-flex align-items-center">
-              <button 
-                className="btn btn-sm btn-link p-0 me-2"
-                onClick={() => setShowMyRequests(!showMyRequests)}
-              >
-                {showMyRequests ? '▼' : '▶'}
-              </button>
-              My Created Requests
-            </h6>
-            <div>
-              <button className="btn btn-sm btn-outline-primary me-1" onClick={() => setShow24Hours(!show24Hours)}>
-                {show24Hours ? '30min' : '24hrs'}
-              </button>
-              <button className="btn btn-sm btn-primary" onClick={createRequest}>
-                + Create
-              </button>
-            </div>
-          </div>
+          <h6 className="fw-bold mb-2">My Created Requests</h6>
 
-          {showMyRequests && requests.filter(req => req.user._id === user._id).map((req) => (
+          {requests.filter(req => req.user._id === user._id).map((req) => (
             <div
               key={req._id}
               className={`card shadow-sm mb-2 request-card ${selected?._id === req._id ? 'selected' : ''}`}
@@ -341,28 +369,52 @@ export default function Dashboard() {
                       Mark Complete
                     </button>
                   )}
+                  {req.user._id === user._id && req.status === 'open' && (
+                    <small className="text-info">Waiting for helper</small>
+                  )}
+                  {req.user._id === user._id && req.status === 'accepted' && (
+                    <small className="text-success">Help accepted</small>
+                  )}
                 </div>
               </div>
             </div>
           ))}
 
           {/* NEARBY REQUESTS */}
-          <div className="d-flex justify-content-between align-items-center mb-2 mt-3">
-            <h6 className="fw-bold mb-0 d-flex align-items-center">
-              <button 
-                className="btn btn-sm btn-link p-0 me-2"
-                onClick={() => setShowNearbyRequests(!showNearbyRequests)}
-              >
-                {showNearbyRequests ? '▼' : '▶'}
-              </button>
-              Nearby Help Requests
-            </h6>
-            <button className="btn btn-sm btn-outline-secondary" onClick={fetchNearby}>
-              🔄 Refresh
-            </button>
-          </div>
+          <h6 className="fw-bold mb-2 mt-3">Nearby Help Requests</h6>
 
-          {showNearbyRequests && requests.filter(req => req.user._id !== user._id).map((req) => (
+          {/* Show accepted requests first with helping card style */}
+          {acceptedRequests.map((req) => (
+            <div
+              key={req._id}
+              className={`card shadow-sm mb-2 request-card ${selected?._id === req._id ? 'selected' : ''}`}
+              onClick={() => handleRequestClick(req)}
+              style={{ cursor: "pointer" }}
+            >
+              <div className="card-body p-2">
+                <div className="d-flex align-items-center mb-1">
+                  <span className="badge bg-warning me-2">{req.category}</span>
+                  <small className="text-muted">{req.user?.name}</small>
+                </div>
+                <p className="small mb-1">{req.description}</p>
+                <div className="d-flex justify-content-between align-items-center">
+                  <span className="badge bg-warning">HELPING</span>
+                  <button 
+                    className="btn btn-sm btn-warning"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      completeHelp();
+                    }}
+                  >
+                    Complete
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* Show other nearby requests */}
+          {requests.filter(req => req.user._id !== user._id).map((req) => (
             <div
               key={req._id}
               className={`card shadow-sm mb-2 request-card ${selected?._id === req._id ? 'selected' : ''}`}
@@ -473,7 +525,7 @@ export default function Dashboard() {
                           className="btn btn-sm btn-primary"
                           onClick={startNavigation}
                         >
-                          🧭 Start Navigation
+                          🧭 Start Direction
                         </button>
                       )}
                       {isNavigating && (

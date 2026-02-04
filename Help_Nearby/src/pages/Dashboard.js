@@ -22,6 +22,8 @@ export default function Dashboard() {
   const [show24Hours, setShow24Hours] = useState(false);
   const [showMyRequests, setShowMyRequests] = useState(true);
   const [showNearbyRequests, setShowNearbyRequests] = useState(true);
+  const [showAllMyRequests, setShowAllMyRequests] = useState(false);
+  const [showAllNearbyRequests, setShowAllNearbyRequests] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -215,22 +217,23 @@ export default function Dashboard() {
     }
   };
 
-  const completeHelp = async () => {
+  const completeHelp = async (requestId = null) => {
     try {
-      await API.post(`/requests/${selected._id}/complete`);
+      const reqId = requestId || selected._id;
+      await API.post(`/requests/${reqId}/complete`);
       
       socket.emit("completeRequest", {
-        requestId: selected._id,
+        requestId: reqId,
         helperId: user._id,
-        requesterId: selected.user._id
+        requesterId: selected?.user?._id || requests.find(r => r._id === reqId)?.user?._id
       });
       
       alert("Help completed successfully!");
-      setSelected(null);
+      if (!requestId) setSelected(null);
       fetchNearby();
       fetchAcceptedRequests();
     } catch (err) {
-      alert("Error completing help");
+      alert("Error completing help: " + (err.response?.data?.message || err.message));
     }
   };
 
@@ -312,6 +315,51 @@ export default function Dashboard() {
     }
   };
 
+  const getTimeAgo = (date) => {
+    const now = new Date();
+    const requestTime = new Date(date);
+    const diffInMinutes = Math.floor((now - requestTime) / (1000 * 60));
+    
+    if (diffInMinutes < 1) return 'Just now';
+    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+    
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    if (diffInHours < 24) return `${diffInHours}h ago`;
+    
+    const diffInDays = Math.floor(diffInHours / 24);
+    return `${diffInDays}d ago`;
+  };
+
+  const calculateDistance = (lat1, lng1, lat2, lng2) => {
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLng/2) * Math.sin(dLng/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const distance = R * c;
+    
+    if (distance < 1) {
+      return `${Math.round(distance * 1000)}m`;
+    }
+    return `${distance.toFixed(1)}km`;
+  };
+
+  const getDistanceText = (req) => {
+    if (!userLocation || !req.location?.coordinates) return '';
+    
+    const reqLat = req.location.coordinates[1];
+    const reqLng = req.location.coordinates[0];
+    
+    return calculateDistance(userLocation.lat, userLocation.lng, reqLat, reqLng);
+  };
+
+  const isRequestExpired = (req) => {
+    if (!req.expiresAt) return false;
+    return new Date() > new Date(req.expiresAt);
+  };
+
   if (!user) return <p className="text-center mt-5">Loading user...</p>;
 
   return (
@@ -336,9 +384,14 @@ export default function Dashboard() {
           </div>
 
           {/* MY CREATED REQUESTS */}
-          <h6 className="fw-bold mb-2">My Created Requests</h6>
+          <div className="d-flex justify-content-between align-items-center mb-2">
+            <h6 className="fw-bold mb-0">My Created Requests</h6>
+          </div>
 
-          {requests.filter(req => req.user._id === user._id).map((req) => (
+          {requests
+            .filter(req => req.user._id === user._id && req.status !== 'completed' && !isRequestExpired(req))
+            .slice(0, showAllMyRequests ? undefined : 3)
+            .map((req) => (
             <div
               key={req._id}
               className={`card shadow-sm mb-2 request-card ${selected?._id === req._id ? 'selected' : ''}`}
@@ -348,43 +401,53 @@ export default function Dashboard() {
               <div className="card-body p-2">
                 <div className="d-flex align-items-center mb-1">
                   <span className="badge bg-info me-2">{req.category}</span>
-                  <small className="text-muted">Created by you</small>
+                  <small className="text-muted">{getTimeAgo(req.createdAt || req.acceptedAt)}</small>
                 </div>
                 <p className="small mb-1">{req.description}</p>
                 <div className="d-flex justify-content-between align-items-center">
-                  <span className={`badge ${req.status === 'open' ? 'bg-success' : req.status === 'accepted' ? 'bg-warning' : 'bg-secondary'}`}>
-                    {req.status}
-                  </span>
+                  <div className="d-flex align-items-center gap-2">
+                    <span className={`badge ${req.status === 'open' ? 'bg-success' : req.status === 'accepted' ? 'bg-warning' : 'bg-secondary'}`}>
+                      {req.status}
+                    </span>
+                    {userLocation && req.location?.coordinates && (
+                      <small className="text-muted">{getDistanceText(req)}</small>
+                    )}
+                  </div>
                   {req.status === 'accepted' && req.helper && (
-                    <small className="text-success">Helper: {req.helper.name}</small>
-                  )}
-                  {req.user._id === user._id && req.status === 'accepted' && (
                     <button 
                       className="btn btn-sm btn-success"
                       onClick={(e) => {
                         e.stopPropagation();
-                        completeHelp();
+                        completeHelp(req._id);
                       }}
                     >
-                      Mark Complete
+                      Complete
                     </button>
-                  )}
-                  {req.user._id === user._id && req.status === 'open' && (
-                    <small className="text-info">Waiting for helper</small>
-                  )}
-                  {req.user._id === user._id && req.status === 'accepted' && (
-                    <small className="text-success">Help accepted</small>
                   )}
                 </div>
               </div>
             </div>
           ))}
+          
+          {requests.filter(req => req.user._id === user._id && req.status !== 'completed' && !isRequestExpired(req)).length > 3 && (
+            <button 
+              className="btn btn-sm btn-outline-primary w-100 mb-3"
+              onClick={() => setShowAllMyRequests(!showAllMyRequests)}
+            >
+              {showAllMyRequests ? 'Show Less' : `Show More (${requests.filter(req => req.user._id === user._id && req.status !== 'completed' && !isRequestExpired(req)).length - 3})`}
+            </button>
+          )}
 
           {/* NEARBY REQUESTS */}
-          <h6 className="fw-bold mb-2 mt-3">Nearby Help Requests</h6>
+          <div className="d-flex justify-content-between align-items-center mb-2 mt-3">
+            <h6 className="fw-bold mb-0">Nearby Help Requests</h6>
+          </div>
 
           {/* Show accepted requests first with helping card style */}
-          {acceptedRequests.map((req) => (
+          {acceptedRequests
+            .filter(req => req.status !== 'completed' && !isRequestExpired(req))
+            .slice(0, showAllNearbyRequests ? undefined : 3)
+            .map((req) => (
             <div
               key={req._id}
               className={`card shadow-sm mb-2 request-card ${selected?._id === req._id ? 'selected' : ''}`}
@@ -394,16 +457,21 @@ export default function Dashboard() {
               <div className="card-body p-2">
                 <div className="d-flex align-items-center mb-1">
                   <span className="badge bg-warning me-2">{req.category}</span>
-                  <small className="text-muted">{req.user?.name}</small>
+                  <small className="text-muted">{getTimeAgo(req.acceptedAt || req.createdAt)}</small>
                 </div>
                 <p className="small mb-1">{req.description}</p>
                 <div className="d-flex justify-content-between align-items-center">
-                  <span className="badge bg-warning">HELPING</span>
+                  <div className="d-flex align-items-center gap-2">
+                    <span className="badge bg-warning">HELPING</span>
+                    {userLocation && req.location?.coordinates && (
+                      <small className="text-muted">{getDistanceText(req)}</small>
+                    )}
+                  </div>
                   <button 
-                    className="btn btn-sm btn-warning"
+                    className="btn btn-sm btn-success"
                     onClick={(e) => {
                       e.stopPropagation();
-                      completeHelp();
+                      completeHelp(req._id);
                     }}
                   >
                     Complete
@@ -414,7 +482,10 @@ export default function Dashboard() {
           ))}
 
           {/* Show other nearby requests */}
-          {requests.filter(req => req.user._id !== user._id).map((req) => (
+          {requests
+            .filter(req => req.user._id !== user._id && req.status !== 'completed' && !isRequestExpired(req))
+            .slice(acceptedRequests.length, showAllNearbyRequests ? undefined : 3)
+            .map((req) => (
             <div
               key={req._id}
               className={`card shadow-sm mb-2 request-card ${selected?._id === req._id ? 'selected' : ''}`}
@@ -424,16 +495,18 @@ export default function Dashboard() {
               <div className="card-body p-2">
                 <div className="d-flex align-items-center mb-1">
                   <span className="badge bg-primary me-2">{req.category}</span>
-                  <small className="text-muted">{req.user?.name}</small>
+                  <small className="text-muted">{getTimeAgo(req.createdAt)}</small>
                 </div>
                 <p className="small mb-1">{req.description}</p>
                 <div className="d-flex justify-content-between align-items-center">
-                  <span className={`badge ${req.status === 'open' ? 'bg-success' : req.status === 'accepted' ? 'bg-warning' : 'bg-secondary'}`}>
-                    {req.status}
-                  </span>
-                  {req.status === 'accepted' && req.helper && (
-                    <small className="text-success">Helper: {req.helper.name}</small>
-                  )}
+                  <div className="d-flex align-items-center gap-2">
+                    <span className={`badge ${req.status === 'open' ? 'bg-success' : req.status === 'accepted' ? 'bg-warning' : 'bg-secondary'}`}>
+                      {req.status}
+                    </span>
+                    {userLocation && req.location?.coordinates && (
+                      <small className="text-muted">{getDistanceText(req)}</small>
+                    )}
+                  </div>
                   {req.user._id !== user._id && req.status === 'open' && (
                     <button 
                       className="btn btn-sm btn-success"
@@ -447,30 +520,31 @@ export default function Dashboard() {
                   )}
                   {req.helper && req.helper._id === user._id && req.status === 'accepted' && (
                     <button 
-                      className="btn btn-sm btn-warning"
+                      className="btn btn-sm btn-success"
                       onClick={(e) => {
                         e.stopPropagation();
-                        completeHelp();
+                        completeHelp(req._id);
                       }}
                     >
                       Complete
-                    </button>
-                  )}
-                  {(req.user._id === user._id || (req.helper && req.helper._id === user._id)) && req.status === 'accepted' && (
-                    <button 
-                      className="btn btn-sm btn-info ms-1"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelected(req);
-                      }}
-                    >
-                      💬 Chat
                     </button>
                   )}
                 </div>
               </div>
             </div>
           ))}
+          
+          {(acceptedRequests.filter(req => req.status !== 'completed' && !isRequestExpired(req)).length + 
+            requests.filter(req => req.user._id !== user._id && req.status !== 'completed' && !isRequestExpired(req)).length) > 3 && (
+            <button 
+              className="btn btn-sm btn-outline-primary w-100 mb-3"
+              onClick={() => setShowAllNearbyRequests(!showAllNearbyRequests)}
+            >
+              {showAllNearbyRequests ? 'Show Less' : 
+                `Show More (${(acceptedRequests.filter(req => req.status !== 'completed' && !isRequestExpired(req)).length + 
+                requests.filter(req => req.user._id !== user._id && req.status !== 'completed' && !isRequestExpired(req)).length) - 3})`}
+            </button>
+          )}
 
           {/* Remove complete button from bottom */}
 
@@ -550,19 +624,33 @@ export default function Dashboard() {
 
               {/* RIGHT: CHAT - Allow chat for accepted and completed requests */}
               <div className="col-md-6">
-                {(selected.status === 'accepted' || selected.status === 'completed' || selected.user._id === user._id) ? (
-                  <ChatBox 
-                    requestId={selected._id} 
-                    requestData={selected}
-                  />
-                ) : (
-                  <div className="card shadow-sm h-100 d-flex align-items-center justify-content-center">
-                    <div className="text-center p-4">
-                      <div style={{ fontSize: '32px', marginBottom: '12px' }}>💬</div>
-                      <p className="text-muted small">Chat available when request is accepted</p>
-                    </div>
+                <div className="card shadow-sm h-100">
+                  <div className="card-header fw-bold d-flex justify-content-between align-items-center">
+                    <span>Request Details</span>
+                    {(selected.status === 'accepted' || selected.status === 'completed') && 
+                     (selected.user._id === user._id || selected.helper?._id === user._id) && (
+                      <button 
+                        className="btn btn-sm btn-success"
+                        onClick={() => completeHelp(selected._id)}
+                      >
+                        Complete Request
+                      </button>
+                    )}
                   </div>
-                )}
+                  {(selected.status === 'accepted' || selected.status === 'completed' || selected.user._id === user._id) ? (
+                    <ChatBox 
+                      requestId={selected._id} 
+                      requestData={selected}
+                    />
+                  ) : (
+                    <div className="card-body d-flex align-items-center justify-content-center h-100">
+                      <div className="text-center p-4">
+                        <div style={{ fontSize: '32px', marginBottom: '12px' }}>💬</div>
+                        <p className="text-muted small">Chat available when request is accepted</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

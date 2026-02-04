@@ -11,6 +11,7 @@ import "../styles/app.css";
 export default function Dashboard() {
   const { user } = useContext(AuthContext);
   const [requests, setRequests] = useState([]);
+  const [myRequests, setMyRequests] = useState([]);
   const [acceptedRequests, setAcceptedRequests] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -140,8 +141,9 @@ export default function Dashboard() {
 
   const fetchNearby = async () => {
     try {
-      // First get user's own requests
+      // First get user's own requests separately
       const myRequestsRes = await API.get('/requests/my-requests');
+      setMyRequests(myRequestsRes.data);
       
       // Then get nearby requests
       navigator.geolocation.getCurrentPosition(async (pos) => {
@@ -151,21 +153,19 @@ export default function Dashboard() {
             `${endpoint}?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`
           );
           
-          // Combine user's requests with nearby requests (limit nearby to 3)
+          // Filter nearby requests (exclude user's own and completed)
           const nearbyRequests = nearbyRes.data
-            .filter(req => req.status !== 'completed')
+            .filter(req => req.user._id !== user._id && req.status !== 'completed')
             .slice(0, 3);
           
-          setRequests([...myRequestsRes.data, ...nearbyRequests]);
+          setRequests(nearbyRequests);
         } catch (err) {
           console.error("Error fetching nearby requests", err);
-          // If geolocation fails, at least show user's own requests
-          setRequests(myRequestsRes.data);
+          setRequests([]);
         }
       }, (error) => {
         console.error("Geolocation error:", error);
-        // If geolocation fails, at least show user's own requests
-        setRequests(myRequestsRes.data);
+        setRequests([]);
       });
     } catch (err) {
       console.error("Error fetching my requests", err);
@@ -182,7 +182,7 @@ export default function Dashboard() {
   };
 
   const createRequest = async () => {
-    const userRequests = requests.filter((r) => r.user._id === user._id);
+    const userRequests = myRequests.filter((r) => r.user._id === user._id);
     if (userRequests.length >= 3) {
       return alert("You can create max 3 requests");
     }
@@ -388,8 +388,8 @@ export default function Dashboard() {
             <h6 className="fw-bold mb-0">My Created Requests</h6>
           </div>
 
-          {requests
-            .filter(req => req.user._id === user._id && req.status !== 'completed' && !isRequestExpired(req))
+          {myRequests
+            .filter(req => req.status !== 'completed')
             .slice(0, showAllMyRequests ? undefined : 3)
             .map((req) => (
             <div
@@ -429,12 +429,12 @@ export default function Dashboard() {
             </div>
           ))}
           
-          {requests.filter(req => req.user._id === user._id && req.status !== 'completed' && !isRequestExpired(req)).length > 3 && (
+          {myRequests.filter(req => req.status !== 'completed').length > 3 && (
             <button 
               className="btn btn-sm btn-outline-primary w-100 mb-3"
               onClick={() => setShowAllMyRequests(!showAllMyRequests)}
             >
-              {showAllMyRequests ? 'Show Less' : `Show More (${requests.filter(req => req.user._id === user._id && req.status !== 'completed' && !isRequestExpired(req)).length - 3})`}
+              {showAllMyRequests ? 'Show Less' : `Show More (${myRequests.filter(req => req.status !== 'completed').length - 3})`}
             </button>
           )}
 
@@ -483,7 +483,7 @@ export default function Dashboard() {
 
           {/* Show other nearby requests */}
           {requests
-            .filter(req => req.user._id !== user._id && req.status !== 'completed' && !isRequestExpired(req))
+            .filter(req => req.status !== 'completed' && !isRequestExpired(req))
             .slice(acceptedRequests.length, showAllNearbyRequests ? undefined : 3)
             .map((req) => (
             <div
@@ -535,14 +535,14 @@ export default function Dashboard() {
           ))}
           
           {(acceptedRequests.filter(req => req.status !== 'completed' && !isRequestExpired(req)).length + 
-            requests.filter(req => req.user._id !== user._id && req.status !== 'completed' && !isRequestExpired(req)).length) > 3 && (
+            requests.filter(req => req.status !== 'completed' && !isRequestExpired(req)).length) > 3 && (
             <button 
               className="btn btn-sm btn-outline-primary w-100 mb-3"
               onClick={() => setShowAllNearbyRequests(!showAllNearbyRequests)}
             >
               {showAllNearbyRequests ? 'Show Less' : 
                 `Show More (${(acceptedRequests.filter(req => req.status !== 'completed' && !isRequestExpired(req)).length + 
-                requests.filter(req => req.user._id !== user._id && req.status !== 'completed' && !isRequestExpired(req)).length) - 3})`}
+                requests.filter(req => req.status !== 'completed' && !isRequestExpired(req)).length) - 3})`}
             </button>
           )}
 

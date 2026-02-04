@@ -7,6 +7,7 @@ export default function MyRequests() {
   const { user } = useContext(AuthContext);
   const [myRequests, setMyRequests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
 
   useEffect(() => {
     if (user) {
@@ -44,6 +45,16 @@ export default function MyRequests() {
     });
   };
 
+  const getFilteredRequests = () => {
+    if (filter === 'all') return myRequests;
+    return myRequests.filter(req => req.status === filter);
+  };
+
+  const getStatusCount = (status) => {
+    if (status === 'all') return myRequests.length;
+    return myRequests.filter(req => req.status === status).length;
+  };
+
   if (loading) {
     return (
       <div className="container mt-5 text-center">
@@ -59,21 +70,35 @@ export default function MyRequests() {
       <div className="row">
         <div className="col-12">
           <div className="d-flex justify-content-between align-items-center mb-4">
-            <h4 className="fw-bold">My Help Requests</h4>
-            <span className="badge bg-info">{myRequests.length} Total</span>
+            <h4 className="fw-bold">My Help Requests ({getFilteredRequests().length})</h4>
+            <div className="d-flex gap-2 align-items-center">
+              <select 
+                className="form-select form-select-sm" 
+                style={{width: 'auto'}}
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              >
+                <option value="all">All ({getStatusCount('all')})</option>
+                <option value="open">Open ({getStatusCount('open')})</option>
+                <option value="accepted">Accepted ({getStatusCount('accepted')})</option>
+                <option value="completed">Completed ({getStatusCount('completed')})</option>
+                <option value="expired">Expired ({getStatusCount('expired')})</option>
+              </select>
+              <span className="badge bg-info">{getFilteredRequests().length} Cards</span>
+            </div>
           </div>
 
-          {myRequests.length === 0 ? (
+          {getFilteredRequests().length === 0 ? (
             <div className="card shadow-sm">
               <div className="card-body text-center py-5">
                 <div style={{ fontSize: '48px', marginBottom: '16px' }}>📋</div>
-                <h5>No requests yet</h5>
-                <p className="text-muted">Your help requests will appear here</p>
+                <h5>No {filter === 'all' ? '' : filter} requests</h5>
+                <p className="text-muted">Your {filter === 'all' ? 'help' : filter} requests will appear here</p>
               </div>
             </div>
           ) : (
             <div className="row g-3">
-              {myRequests.map((request) => (
+              {getFilteredRequests().map((request) => (
                 <div key={request._id} className="col-md-6 col-lg-4">
                   <div className="card shadow-sm h-100">
                     <div className="card-body">

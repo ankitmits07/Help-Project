@@ -1,6 +1,7 @@
 import { useContext, useState, useEffect } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { Link, useNavigate } from "react-router-dom";
+import API from "../api/api";
 import "bootstrap/dist/css/bootstrap.min.css";
 
 export default function Navbar() {
@@ -71,6 +72,39 @@ export default function Navbar() {
     setNotifications([]);
     localStorage.removeItem('helpNotifications');
     window.dispatchEvent(new CustomEvent('clearAllNotifications'));
+  };
+
+  const acceptRequestFromNav = async (requestId, notificationId) => {
+    try {
+      await API.post(`/requests/${requestId}/accept`);
+      
+      // Remove from localStorage
+      const existingNotifications = JSON.parse(localStorage.getItem('helpNotifications') || '[]');
+      const filteredNotifications = existingNotifications.filter(notif => notif.id !== notificationId);
+      localStorage.setItem('helpNotifications', JSON.stringify(filteredNotifications));
+      setNotifications(filteredNotifications);
+      
+      alert('Request accepted!');
+      window.location.reload();
+    } catch (err) {
+      alert('Failed to accept request: ' + (err.response?.data?.message || err.message));
+    }
+  };
+
+  const rejectRequestFromNav = async (requestId, notificationId) => {
+    try {
+      await API.post(`/requests/${requestId}/reject`);
+      
+      // Remove from localStorage
+      const existingNotifications = JSON.parse(localStorage.getItem('helpNotifications') || '[]');
+      const filteredNotifications = existingNotifications.filter(notif => notif.id !== notificationId);
+      localStorage.setItem('helpNotifications', JSON.stringify(filteredNotifications));
+      setNotifications(filteredNotifications);
+      
+      alert('Request rejected');
+    } catch (err) {
+      alert('Failed to reject request: ' + (err.response?.data?.message || err.message));
+    }
   };
 
   return (
@@ -154,20 +188,26 @@ export default function Navbar() {
                             <div className="notif-content">
                               <div className="notif-title">{notif.title}</div>
                               <div className="notif-message">{notif.message}</div>
-                              {notif.actions && (
-                                <div className="notif-actions">
-                                  {notif.actions.map((action, i) => (
-                                    <button
-                                      key={i}
-                                      className={`notif-btn ${action.type}`}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        action.handler();
-                                      }}
-                                    >
-                                      {action.label}
-                                    </button>
-                                  ))}
+                              {notif.requestData && (
+                                <div className="notif-actions mt-2">
+                                  <button
+                                    className="btn btn-sm btn-success me-2"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      acceptRequestFromNav(notif.requestData.requestId, notif.id);
+                                    }}
+                                  >
+                                    Accept
+                                  </button>
+                                  <button
+                                    className="btn btn-sm btn-danger"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      rejectRequestFromNav(notif.requestData.requestId, notif.id);
+                                    }}
+                                  >
+                                    Reject
+                                  </button>
                                 </div>
                               )}
                             </div>

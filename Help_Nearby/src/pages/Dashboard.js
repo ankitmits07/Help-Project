@@ -467,15 +467,6 @@ export default function Dashboard() {
                       <small className="text-muted">{getDistanceText(req)}</small>
                     )}
                   </div>
-                  <button 
-                    className="btn btn-sm btn-success"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      completeHelp(req._id);
-                    }}
-                  >
-                    Complete
-                  </button>
                 </div>
               </div>
             </div>
@@ -519,15 +510,7 @@ export default function Dashboard() {
                     </button>
                   )}
                   {req.helper && req.helper._id === user._id && req.status === 'accepted' && (
-                    <button 
-                      className="btn btn-sm btn-success"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        completeHelp(req._id);
-                      }}
-                    >
-                      Complete
-                    </button>
+                    <span className="badge bg-info">You're helping</span>
                   )}
                 </div>
               </div>
@@ -627,8 +610,7 @@ export default function Dashboard() {
                 <div className="card shadow-sm h-100">
                   <div className="card-header fw-bold d-flex justify-content-between align-items-center">
                     <span>Request Details</span>
-                    {(selected.status === 'accepted' || selected.status === 'completed') && 
-                     (selected.user._id === user._id || selected.helper?._id === user._id) && (
+                    {selected.user._id === user._id && (
                       <button 
                         className="btn btn-sm btn-success"
                         onClick={() => completeHelp(selected._id)}
